@@ -1,5 +1,6 @@
 defmodule ImportElementWeb.ImportElementLive do
   use ImportElementWeb, :live_view
+  import SweetXml
 
   def mount(_params, _session, socket) do
     {:ok,
@@ -81,6 +82,8 @@ defmodule ImportElementWeb.ImportElementLive do
           {:ok, ~p"/uploads/#{Path.basename(destination)}"}
         end)
 
+      process_file(uploaded_file)
+
       {:noreply, put_flash(socket, :info, "file #{uploaded_file} uploaded")}
     else
       {:noreply, socket}
@@ -89,4 +92,52 @@ defmodule ImportElementWeb.ImportElementLive do
 
   def error_to_string(:too_large), do: "Too large"
   def error_to_string(:not_accepted), do: "You have selected an unacceptable file type"
+
+  defp process_file(uploaded_file) do
+    destination =
+      Path.join([
+        :code.priv_dir(:import_element),
+        "static",
+        "uploads",
+        Path.basename(uploaded_file)
+      ])
+
+    {:ok, xml} = File.read(destination)
+
+    xml
+    |> xpath(
+      ~x"//root//row"l,
+      employee: [
+        ~x"./Employee",
+        dunkin_id: ~x"./DunkinId/text()"s,
+        dunkin_branch: ~x"./DunkinBranch/text()"s,
+        first_name: ~x"./FirstName/text()"s,
+        last_name: ~x"./LastName/text()"s,
+        dob: ~x"./DOB/text()"s,
+        phone_number: ~x"./PhoneNumber/text()"s
+      ],
+      payor: [
+        ~x"./Payor",
+        dunkin_id: ~x"./DunkinId/text()"s,
+        aba_routing: ~x"./ABARouting/text()"s,
+        account_number: ~x"./AccountNumber/text()"s,
+        name: ~x"./Name/text()"s,
+        dba: ~x"./DBA/text()"s,
+        ein: ~x"./EIN/text()"s,
+        address: [
+          ~x"./Address",
+          line_1: ~x"./Line1/text()"s,
+          city: ~x"./City/text()"s,
+          state: ~x"./State/text()"s,
+          zip: ~x"./Zip/text()"s
+        ]
+      ],
+      payee: [
+        ~x"./Payee",
+        plaid_id: ~x"./PlaidId/text()"s,
+        loan_account_number: ~x"./LoanAccountNumber/text()"s
+      ],
+      amount: ~x"./Amount/text()"s
+    )
+  end
 end
