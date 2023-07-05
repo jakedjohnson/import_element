@@ -6,12 +6,20 @@ A service for bulk uploading spreadsheet data to the Method API. The frontend da
 
 ImportElement is a web application powered by Phoenix. When TaxJar needed to scale their spreadsheet importer, they chose Elixir. A service built with Elixir gaurantees solid performance and painless scaling as import volume grows; it's a great choice whenever a feature (such as parsing and processing large sets of XML data in memory) requires speedy and reliable concurrency.
 
-## Getting ImportElement running on a new machine
+## Getting ImportElement running on MacOS
 
 First install Erlang and Elixir.
 
-If you use [asdf](https://asdf-vm.com/) for version management, then `.tool-versions` file contains the Elixir and Erlang versions required. You should only have to clone and open this repo and then run:
+If you use [asdf](https://asdf-vm.com/) for version management, then `.tool-versions` file contains the Elixir and Erlang versions required.
 
+First add the required plugins:
+```
+asdf plugin add elixir
+asdf plugin add erlang
+```
+> Note: if you encounter OpenSSL or Java compiler related issues, the [Erlang plugin](https://github.com/asdf-vm/asdf-erlang#osx) may require further configuration.
+
+Then in the repo's root run:
 ```
 asdf install
 ```
@@ -21,9 +29,11 @@ Otherwise, here's where to download each:
 - [Erlang](https://www.erlang.org/patches/otp-25.3.2.3)
 - [Elixir](https://elixir-lang.org/install.html)
 
-Erlang takes a while to do its thing. Once they are operational, start the Phoenix server in the repo's root directory:
+Erlang may take a while to do its thing.
 
-- Run `mix setup` to install and setup the app's dependencies
+Once they are operational, start the Phoenix server in the repo's root directory:
+
+- Successfully run `mix setup` to install and setup the app's dependencies
 - Start the application with `mix phx.server`, or with IEx (Interactive Elixir shell) using `iex -S mix phx.server`
 
 Now you can visit [`localhost:4000`](http://localhost:4000) from your browser to begin the import process.
