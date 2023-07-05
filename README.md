@@ -93,15 +93,16 @@ When a user uploads an XML of unique payments, ImportElement performs the follow
 - [ ] Authenticate logged in user via `api_key` or `element_token` request parameter?
 - [ ] Better error handling on XML upload (bad param value formatting, XML syntax errors, etc)
 - [ ] CSV upload ability (smaller files allow for more volume)
-- [ ] Immediately and compress send the XML file to remote storage
+- [ ] Immediately send the XML file to remote storage on the client side
+  - https://hexdocs.pm/phoenix_live_view/uploads-external.html
   - pros:
     - a carbon copy will help with debugging/testing in the future
   - cons:
     - XML is larger storage space
-    - complaince considerations:
-      - short and long term storage need to meet security standards
-      - is there a documented data retention policy in place?
-      - determine in advance what data we scrub & retain for business vs hard delete when users request
+  - compliance considerations:
+    - short and long term storage need to meet security standards
+    - is there a documented data retention policy in place?
+    - determine in advance what data we scrub & retain for business vs hard delete when users request
 - [ ] move some work to async jobs or a messaging brokering system if errors increase, users experience timeouts, etc.
 - [ ] Retries for failed API calls to the Method API
 - [ ] Make the dashboard's endpoints part of Method's public API? (headless option for bulk upload)

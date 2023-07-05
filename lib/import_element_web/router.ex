@@ -17,7 +17,7 @@ defmodule ImportElementWeb.Router do
   scope "/", ImportElementWeb do
     pipe_through :browser
 
-    get "/", PageController, :home
+    live "/", ImportElementLive
   end
 
   # Other scopes may use custom stacks.
