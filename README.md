@@ -40,7 +40,7 @@ Now you can visit [`localhost:4000`](http://localhost:4000) from your browser to
 
 # Implementation Details
 
-The ImportElement is intended for authenticated users to bulk upload spreadsheets (XML) containing payment information between source (ACH?) accounts and destination (liability?) accounts.
+The ImportElement is intended for authenticated users to bulk upload spreadsheets (XML) containing payment information between source (ACH) accounts and destination (liability) accounts.
 
 There are two distinct layers to the backend logic:
 
@@ -54,10 +54,9 @@ When a user uploads an XML of unique payments, ImportElement performs the follow
 1. A remote and local copy of the file are stored
 2. An `import_request` gets created. This is the main object of the Import Element - each file uploaded equals a new `import_request`.
 
-- `import_request.api_user_id` is the Method API user performing the spreadsheet upload (in this case, Dunkies). It should be associated to the API key used and/or `element_token` provided
+
 - `import_request.status` - progress tracking
-- `import_request.remote_store` - the storage location of the uploaded spreadsheet
-- `import_request.local_store` - the locally stored spreadsheet for parsing
+- `import_request.filepath` - the storage location of the spreadsheet
 
 3. parses the XML data using the SweetXML Elixir Dependency
 4. temporarily persists all entities, accounts, and payments in local application database
@@ -69,7 +68,7 @@ When a user uploads an XML of unique payments, ImportElement performs the follow
 
 5. validates the spreadsheet data contains acceptable API parameters
 
-- Any invalidomits
+- Any invalid entities are omitted
 
 6. upserts all records via the Method API
 
@@ -85,10 +84,10 @@ When a user uploads an XML of unique payments, ImportElement performs the follow
 
 ## Feature #2 - Exporting Reports
 
-- 1. when an `import_request` is "completed", the user operating the import element can click to see more information about the import
-- 2. the page showing information about the `import_request` allows for downloading 3 different report CSVs generated from the original XML data provided.
-  - i) outgoing payment totals for each unique source account (5 different corporate checking accounts owned by Dunkin)
-  - ii) outgoing payment totals per unique corporate entity (30 unique dunkin branches)
+- 1. when an `import_request` is "completed", the user can access the payment reports
+- 2. the payment reports page allows for downloading 3 different report CSVs generated from the original XML data provided.
+  - i) outgoing payment totals for each unique 5 different corporate checking source accounts owned by Dunkin
+  - ii) outgoing payment totals per 30 unique dunkin branches (a branch isn't an entity we care about for account ownership, we just need it to be present for aggregation during payment reports)
   - iii) the status of every payment and its relevant metadata
 - 3. reports can be downloaded
 
@@ -116,3 +115,6 @@ When a user uploads an XML of unique payments, ImportElement performs the follow
 - [ ] move some work to async jobs or a messaging brokering system if errors increase, users experience timeouts, etc.
 - [ ] Retries for failed API calls to the Method API
 - [ ] Make the dashboard's endpoints part of Method's public API? (headless option for bulk upload)
+- [ ] `import_request.api_user_id` being the Method API user performing the spreadsheet upload (in this case, Dunkies). It should be associated to the API key used and/or `element_token` provided
+- [ ] idempotency of `import_request` flow
+- [ ] db cleanup when import_requests are not actively working (all uploads complete == empty database)
