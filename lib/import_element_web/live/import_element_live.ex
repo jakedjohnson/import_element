@@ -2,10 +2,15 @@ defmodule ImportElementWeb.ImportElementLive do
   use ImportElementWeb, :live_view
   import SweetXml
 
+  alias ImportElement.{EntityDetail, ImportRequest, Repo}
+
   def mount(_params, _session, socket) do
     {:ok,
      socket
      |> assign(:uploaded_files, [])
+     |> assign(:import_requests, [])
+     |> assign(:running, false)
+     |> assign(:payments, [])
      |> allow_upload(:file,
        accept: ~w(.xml),
        max_file_size: 42_000_000,
@@ -18,12 +23,13 @@ defmodule ImportElementWeb.ImportElementLive do
   def render(assigns) do
     ~H"""
     <h1>ImportElement</h1>
+    <br />
     <form id="upload-form" phx-submit="save" phx-change="validate">
       <div class="container" phx-drop-target={@uploads.file.ref}>
-        <label for={@uploads.file.ref}>File</label>
         <.live_file_input upload={@uploads.file} />
       </div>
     </form>
+    <br />
     <section>
       <%= for entry <- @uploads.file.entries do %>
         <article class="upload-entry">
@@ -49,14 +55,39 @@ defmodule ImportElementWeb.ImportElementLive do
       <% end %>
     </section>
     <section>
-      <%= for uploaded_file <- @uploaded_files do %>
+      <%= for import_request <- @import_requests do %>
         <article class="upload-entry">
-          <%= IO.inspect(uploaded_file) %>
+          <%= IO.inspect(import_request.id) %>
         </article>
       <% end %>
     </section>
+    <%= if @running do %>
+      <.spinner />
+    <% else %>
+      <span class="text-gray-900 font-medium">
+        <%= if @payments, do: "#{@payments} rows", else: "?" %>
+      </span>
+    <% end %>
     """
   end
+
+  defp spinner(assigns) do
+    ~H"""
+    <svg
+      phx-no-format
+      class="inline mr-2 w-4 h-4 text-gray-200 animate-spin fill-blue-600"
+      viewBox="0 0 100 101"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <path d="M100 50.5908C100 78.2051 77.6142 100.591 50 100.591C22.3858 100.591 0 78.2051 0 50.5908C0 22.9766 22.3858 0.59082 50 0.59082C77.6142 0.59082 100 22.9766 100 50.5908ZM9.08144 50.5908C9.08144 73.1895 27.4013 91.5094 50 91.5094C72.5987 91.5094 90.9186 73.1895 90.9186 50.5908C90.9186 27.9921 72.5987 9.67226 50 9.67226C27.4013 9.67226 9.08144 27.9921 9.08144 50.5908Z" fill="currentColor" />
+      <path d="M93.9676 39.0409C96.393 38.4038 97.8624 35.9116 97.0079 33.5539C95.2932 28.8227 92.871 24.3692 89.8167 20.348C85.8452 15.1192 80.8826 10.7238 75.2124 7.41289C69.5422 4.10194 63.2754 1.94025 56.7698 1.05124C51.7666 0.367541 46.6976 0.446843 41.7345 1.27873C39.2613 1.69328 37.813 4.19778 38.4501 6.62326C39.0873 9.04874 41.5694 10.4717 44.0505 10.1071C47.8511 9.54855 51.7191 9.52689 55.5402 10.0491C60.8642 10.7766 65.9928 12.5457 70.6331 15.2552C75.2735 17.9648 79.3347 21.5619 82.5849 25.841C84.9175 28.9121 86.7997 32.2913 88.1811 35.8758C89.083 38.2158 91.5421 39.6781 93.9676 39.0409Z" fill="currentFill" />
+    </svg>
+    """
+  end
+
+  def error_to_string(:too_large), do: "Too large"
+  def error_to_string(:not_accepted), do: "You have selected an unacceptable file type"
 
   def handle_event("validate", _, socket) do
     {:noreply, socket}
@@ -69,7 +100,7 @@ defmodule ImportElementWeb.ImportElementLive do
   defp handle_progress(:file, entry, socket) do
     if entry.done? do
       uploaded_file =
-        consume_uploaded_entry(socket, entry, fn %{path: live_view_upload_path} ->
+        consume_uploaded_entry(socket, entry, fn %{path: live_view_upload} ->
           destination =
             Path.join([
               :code.priv_dir(:import_element),
@@ -78,66 +109,264 @@ defmodule ImportElementWeb.ImportElementLive do
               Path.basename(entry.client_name)
             ])
 
-          File.cp!(live_view_upload_path, destination)
+          File.cp!(live_view_upload, destination)
           {:ok, ~p"/uploads/#{Path.basename(destination)}"}
         end)
 
-      process_file(uploaded_file)
+      import_request = start_import_request(uploaded_file)
+      import_requests = [import_request | socket.assigns.import_requests]
 
-      {:noreply, put_flash(socket, :info, "file #{uploaded_file} uploaded")}
+      {:noreply,
+       socket
+       |> put_flash(:info, "#{import_request.file} uploaded")
+       |> assign(import_requests: import_requests)
+       |> assign(current_step: import_request.status)
+       |> assign(running: true)}
     else
       {:noreply, socket}
     end
   end
 
-  def error_to_string(:too_large), do: "Too large"
-  def error_to_string(:not_accepted), do: "You have selected an unacceptable file type"
+  defp start_import_request(uploaded_file) do
+    import_request = ImportRequest.create(%{file: uploaded_file})
+    Task.async(fn -> parse_xml(import_request) end)
+    import_request
+  end
 
-  defp process_file(uploaded_file) do
+  defp parse_xml(import_request) do
+    import_request = ImportRequest.update(import_request, %{status: "parsing_xml"})
+
     destination =
       Path.join([
         :code.priv_dir(:import_element),
         "static",
         "uploads",
-        Path.basename(uploaded_file)
+        Path.basename(import_request.file)
       ])
 
     {:ok, xml} = File.read(destination)
 
-    xml
-    |> xpath(
-      ~x"//root//row"l,
-      employee: [
-        ~x"./Employee",
-        dunkin_id: ~x"./DunkinId/text()"s,
-        dunkin_branch: ~x"./DunkinBranch/text()"s,
-        first_name: ~x"./FirstName/text()"s,
-        last_name: ~x"./LastName/text()"s,
-        dob: ~x"./DOB/text()"s,
-        phone_number: ~x"./PhoneNumber/text()"s
-      ],
-      payor: [
-        ~x"./Payor",
-        dunkin_id: ~x"./DunkinId/text()"s,
-        aba_routing: ~x"./ABARouting/text()"s,
-        account_number: ~x"./AccountNumber/text()"s,
-        name: ~x"./Name/text()"s,
-        dba: ~x"./DBA/text()"s,
-        ein: ~x"./EIN/text()"s,
-        address: [
-          ~x"./Address",
-          line_1: ~x"./Line1/text()"s,
-          city: ~x"./City/text()"s,
-          state: ~x"./State/text()"s,
-          zip: ~x"./Zip/text()"s
+    data =
+      xml
+      |> xpath(
+        ~x"//root//row"l,
+        amount: ~x"./Amount/text()"s,
+        source: [
+          ~x"./Payor",
+          entity: [
+            ~x".",
+            corporation: [
+              ~x".",
+              name: ~x"./Name/text()"s,
+              dba: ~x"./DBA/text()"s,
+              ein: ~x"./EIN/text()"s,
+              address: [
+                ~x"./Address",
+                line_1: ~x"./Line1/text()"s,
+                city: ~x"./City/text()"s,
+                state: ~x"./State/text()"s,
+                zip: ~x"./Zip/text()"s
+              ]
+            ]
+          ],
+          account: [
+            ~x".",
+            ach: [
+              ~x".",
+              routing: ~x"./ABARouting/text()"s,
+              number: ~x"./AccountNumber/text()"s
+            ],
+            metadata: [
+              ~x".",
+              dunkin_id: ~x"./DunkinId/text()"s
+            ]
+          ]
+        ],
+        destination: [
+          ~x".",
+          entity: [
+            ~x".",
+            individual: [
+              ~x"./Employee",
+              first_name: ~x"./FirstName/text()"s,
+              last_name: ~x"./LastName/text()"s,
+              dob: ~x"./DOB/text()"s,
+              phone_number: ~x"./PhoneNumber/text()"s
+            ],
+            metadata: [
+              ~x"./Employee",
+              dunkin_id: ~x"./DunkinId/text()"s,
+              dunkin_branch: ~x"./DunkinBranch/text()"s
+            ]
+          ],
+          account: [
+            ~x".",
+            liability: [
+              ~x"./Payee",
+              number: ~x"./LoanAccountNumber/text()"s
+            ],
+            metadata: [
+              ~x"./Payee",
+              plaid_id: ~x"./PlaidId/text()"s
+            ]
+          ]
+        ],
+        metadata: [
+          ~x".",
+          dunkin_employee: ~x"./Employee/DunkinId/text()"s,
+          dunkin_branch: ~x"./Employee/DunkinBranch/text()"s,
+          source_account: ~x"./Payor/DunkinId/text()"s
         ]
-      ],
-      payee: [
-        ~x"./Payee",
-        plaid_id: ~x"./PlaidId/text()"s,
-        loan_account_number: ~x"./LoanAccountNumber/text()"s
-      ],
-      amount: ~x"./Amount/text()"s
-    )
+      )
+
+    %{
+      next_step: :process_file,
+      import_request: import_request,
+      data: data
+    }
   end
+
+  defp process_file(import_request, data) do
+    data
+    |> Enum.each(fn %{
+                      amount: amount,
+                      destination: %{
+                        entity: %{
+                          individual: individual,
+                          metadata: individual_metadata
+                        },
+                        account: %{
+                          liability: liability,
+                          metadata: liability_metadata
+                        }
+                      },
+                      source: %{
+                        account: %{
+                          ach: ach,
+                          metadata: ach_metadata
+                        },
+                        entity: %{
+                          corporation: corporation
+                        }
+                      },
+                      metadata: payment_metadata
+                    } ->
+      Ecto.Multi.new()
+      |> Ecto.Multi.insert(
+        :individual,
+        EntityDetail.changeset(%{
+          import_request_id: import_request.id,
+          type: "individual",
+          uid: individual_metadata.dunkin_id,
+          data: %{
+            type: "individual",
+            individual: individual,
+            metadata: individual_metadata
+          }
+        }),
+        on_conflict: [set: [updated_at: DateTime.utc_now()]],
+        conflict_target: [:import_request_id, :uid, :type],
+        returning: true
+      )
+      |> Ecto.Multi.insert(
+        :corporation,
+        EntityDetail.changeset(%{
+          import_request_id: import_request.id,
+          type: "corporation",
+          uid: corporation.ein,
+          data: %{
+            type: "corporation",
+            corporation: corporation
+          }
+        }),
+        on_conflict: [set: [updated_at: DateTime.utc_now()]],
+        conflict_target: [:import_request_id, :uid, :type],
+        returning: true
+      )
+      |> Ecto.Multi.insert(
+        :destination,
+        fn %{individual: individual} ->
+          Ecto.build_assoc(
+            individual,
+            :account_details,
+            %{
+              import_request_id: individual.import_request_id,
+              entity_detail_id: individual.id,
+              type: "liability",
+              uid: liability.number,
+              data: %{
+                liability: liability,
+                metadata: liability_metadata
+              }
+            }
+          )
+        end,
+        on_conflict: [set: [updated_at: DateTime.utc_now()]],
+        conflict_target: [:entity_detail_id, :uid, :type],
+        returning: true
+      )
+      |> Ecto.Multi.insert(
+        :source,
+        fn %{corporation: corporation} ->
+          Ecto.build_assoc(
+            corporation,
+            :account_details,
+            %{
+              import_request_id: corporation.import_request_id,
+              entity_detail_id: corporation.id,
+              type: "ach",
+              uid: ach_metadata.dunkin_id,
+              data: %{
+                ach: Map.put(ach, :type, "checking"),
+                metadata: ach_metadata
+              }
+            }
+          )
+        end,
+        on_conflict: [set: [updated_at: DateTime.utc_now()]],
+        conflict_target: [:entity_detail_id, :uid, :type],
+        returning: true
+      )
+      |> Ecto.Multi.insert(
+        :payment,
+        fn %{destination: liability, source: ach} ->
+          ImportElement.PaymentDetail.changeset(%{
+            import_request_id: import_request.id,
+            source_id: ach.id,
+            destination_id: liability.id,
+            data: %{
+              amount: amount,
+              metadata: payment_metadata
+            }
+          })
+        end
+      )
+      |> Repo.transaction()
+    end)
+
+    %{
+      import_request: import_request,
+      parsed_individuals: 0,
+      parsed_corporations: 0,
+      next_step: :syncing_entities
+    }
+  end
+
+  ### "State machine" management
+
+  def handle_info({ref, %{next_step: :process_file} = message}, socket) do
+    end_task(ref)
+    status = "processing_file"
+    import_request = ImportRequest.update(message.import_request, %{status: status})
+    Task.async(fn -> process_file(import_request, message.data) end)
+    {:noreply, assign(socket, running: true, current_step: status)}
+  end
+
+  # catch all for unexpected messages
+  def handle_info({ref, _result}, socket) do
+    Process.demonitor(ref, [:flush])
+    {:noreply, assign(socket, running: false, current_step: "unknown?")}
+  end
+
+  defp end_task(ref), do: Process.demonitor(ref, [:flush])
 end
