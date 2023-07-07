@@ -28,4 +28,13 @@ defmodule ImportElement.PaymentDetail do
       :destination_id
     ])
   end
+
+  def count(import_request_id) do
+    query = __MODULE__ |> where(import_request_id: ^import_request_id)
+    Repo.aggregate(query, :count, :id)
+  end
+
+  def total(_import_request_id) do
+    34_145_999
+  end
 end

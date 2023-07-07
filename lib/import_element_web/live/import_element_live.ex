@@ -8,7 +8,7 @@ defmodule ImportElementWeb.ImportElementLive do
     {:ok,
      socket
      |> assign(:uploaded_files, [])
-     |> assign(:import_requests, [])
+     |> assign(:import_requests, ImportRequest.all())
      |> assign(:running, false)
      |> assign(:payments, [])
      |> allow_upload(:file,
@@ -57,8 +57,24 @@ defmodule ImportElementWeb.ImportElementLive do
     <section>
       <%= for import_request <- @import_requests do %>
         <article class="upload-entry">
-          <%= IO.inspect(import_request.id) %>
+          <%= inspect(import_request.id) %>
+          <%= if import_request.data["totals"] do %>
+            <% totals = import_request.data["totals"] %>
+            <h4>From XML:</h4>
+            <ul>
+              <li>Corporations: <%= totals["corporation_count"] || 0 %></li>
+              <li>ACH Accounts: <%= totals["ach_count"] || 0 %></li>
+              <li>Individuals: <%= totals["individual_count"] || 0 %></li>
+              <li>Liability Accounts: <%= totals["liability_count"] || 0 %></li>
+              <li>Payments (rows): <%= totals["payment_count"] || 0 %></li>
+              <li>Payments total: <%= totals["payment_total"] || 0 %></li>
+            </ul>
+          <% else %>
+            No totals to display.
+          <% end %>
+          <ul></ul>
         </article>
+        <br />
       <% end %>
     </section>
     <%= if @running do %>
@@ -134,7 +150,7 @@ defmodule ImportElementWeb.ImportElementLive do
   end
 
   defp parse_xml(import_request) do
-    import_request = ImportRequest.update(import_request, %{status: "parsing_xml"})
+    import_request = ImportRequest.update_request(import_request, %{status: "parsing_xml"})
 
     destination =
       Path.join([
@@ -345,21 +361,38 @@ defmodule ImportElementWeb.ImportElementLive do
     end)
 
     %{
+      next_step: :api_sync,
       import_request: import_request,
-      parsed_individuals: 0,
-      parsed_corporations: 0,
-      next_step: :syncing_entities
+      data: %{
+        totals: ImportElement.ImportRequest.totals(import_request.id)
+      }
     }
   end
 
   ### "State machine" management
 
+  ### "State machine" / import request flow management
+
   def handle_info({ref, %{next_step: :process_file} = message}, socket) do
     end_task(ref)
     status = "processing_file"
-    import_request = ImportRequest.update(message.import_request, %{status: status})
+    import_request = ImportRequest.update_request(message.import_request, %{status: status})
     Task.async(fn -> process_file(import_request, message.data) end)
     {:noreply, assign(socket, running: true, current_step: status)}
+  end
+
+  def handle_info(
+        {ref, %{next_step: :api_sync, import_request: import_request, data: data}},
+        socket
+      ) do
+    end_task(ref)
+    status = "api_aync"
+    import_request = ImportRequest.update_request(import_request, %{status: status})
+    import_request = ImportRequest.update_request_data(import_request, data)
+    Task.async(fn -> sync_api(import_request) end)
+
+    {:noreply,
+     assign(socket, running: true, current_step: status, import_requests: ImportRequest.all())}
   end
 
   # catch all for unexpected messages

@@ -31,4 +31,14 @@ defmodule ImportElement.AccountDetail do
     account_details
     |> cast(attrs, [:uid, :type, :data, :import_request_id, :entity_detail_id])
   end
+
+  def ach_count(import_request_id) do
+    query = __MODULE__ |> where(import_request_id: ^import_request_id, type: "ach")
+    Repo.aggregate(query, :count, :id)
+  end
+
+  def liability_count(import_request_id) do
+    query = __MODULE__ |> where(import_request_id: ^import_request_id, type: "liability")
+    Repo.aggregate(query, :count, :id)
+  end
 end

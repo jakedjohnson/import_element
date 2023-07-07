@@ -24,4 +24,20 @@ defmodule ImportElement.EntityDetail do
     |> cast(attrs, [:type, :method_id, :uid, :import_request_id, :data])
     |> validate_required([:uid, :type])
   end
+
+  def all_for_import_request(import_request_id) do
+    __MODULE__
+    |> where(import_request_id: ^import_request_id)
+    |> Repo.all()
+  end
+
+  def corporation_count(import_request_id) do
+    query = __MODULE__ |> where(import_request_id: ^import_request_id, type: "corporation")
+    Repo.aggregate(query, :count, :id)
+  end
+
+  def individual_count(import_request_id) do
+    query = __MODULE__ |> where(import_request_id: ^import_request_id, type: "individual")
+    Repo.aggregate(query, :count, :id)
+  end
 end
