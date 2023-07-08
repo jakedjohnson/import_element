@@ -292,7 +292,7 @@ defmodule ImportElementWeb.ImportElementLive do
           uid: corporation.ein,
           data: %{
             type: "corporation",
-            corporation: corporation
+            corporation: Map.put(corporation, :owners, [])
           }
         }),
         on_conflict: [set: [updated_at: DateTime.utc_now()]],
@@ -368,8 +368,6 @@ defmodule ImportElementWeb.ImportElementLive do
       }
     }
   end
-
-  ### "State machine" management
 
   ### "State machine" / import request flow management
 
