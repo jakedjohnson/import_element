@@ -10,6 +10,7 @@ defmodule ImportElement.PaymentDetail do
     field :method_id, :string
     field :data, :map
     field :ready, :boolean
+    field :imported_at, :utc_datetime
 
     belongs_to :import_request, ImportElement.ImportRequest
     belongs_to :source, ImportElement.AccountDetail
@@ -29,7 +30,8 @@ defmodule ImportElement.PaymentDetail do
       :source_id,
       :destination_id,
       :ready,
-      :amount
+      :amount,
+      :imported_at
     ])
     |> check_ready()
     |> convert_amount()
@@ -41,7 +43,7 @@ defmodule ImportElement.PaymentDetail do
     put_change(changeset, :ready, params_ready(data))
   end
 
-  defp params_ready(%{"source_id" => _, "destination_id" => _}), do: true
+  defp params_ready(%{"source" => _, "destination" => _}), do: true
   defp params_ready(_), do: false
 
   defp convert_amount(changeset) do
@@ -59,8 +61,24 @@ defmodule ImportElement.PaymentDetail do
     Repo.aggregate(query, :count, :id)
   end
 
-  def total(_import_request_id) do
-    34_145_999
+  def total(import_request_id) do
+    query = __MODULE__ |> where(import_request_id: ^import_request_id)
+    Repo.aggregate(query, :sum, :amount) || Money.new(0)
+  end
+
+  def ready_count(import_request_id) do
+    query = __MODULE__ |> where(import_request_id: ^import_request_id, ready: true)
+    Repo.aggregate(query, :count, :id)
+  end
+
+  def ready_total(import_request_id) do
+    query = __MODULE__ |> where(import_request_id: ^import_request_id, ready: true)
+    Repo.aggregate(query, :sum, :amount) || Money.new(0)
+  end
+
+  def all_ready(import_request_id) do
+    query = __MODULE__ |> where(import_request_id: ^import_request_id, ready: true)
+    Repo.all(query)
   end
 
   def batch_merge_data(payment_details, attrs) do
@@ -72,5 +90,13 @@ defmodule ImportElement.PaymentDetail do
       Ecto.Multi.update(multi, {:payment_detail, idx}, changeset)
     end)
     |> Repo.transaction()
+  end
+
+  def sync_method_response(payment_detail, data) do
+    changeset = changeset(payment_detail, %{
+      method_id: data["id"],
+      imported_at: DateTime.utc_now()
+    })
+    Repo.update!(changeset)
   end
 end

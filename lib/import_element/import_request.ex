@@ -9,6 +9,7 @@ defmodule ImportElement.ImportRequest do
     field :status, :string, default: "ready"
     field :file, :string
     field :data, :map
+    field :completed_at, :utc_datetime
 
     has_many :entity_details, ImportElement.EntityDetail
     has_many :account_details, ImportElement.AccountDetail
@@ -21,7 +22,7 @@ defmodule ImportElement.ImportRequest do
 
   def changeset(import_request, attrs) do
     import_request
-    |> cast(attrs, [:status, :file, :data])
+    |> cast(attrs, [:status, :file, :data, :completed_at])
     |> validate_required([:file])
   end
 
@@ -49,6 +50,10 @@ defmodule ImportElement.ImportRequest do
     update_request(import_request, %{data: merged_data})
   end
 
+  def find(id) do
+    Repo.get!(__MODULE__, id)
+  end
+
   def all() do
     __MODULE__
     |> order_by(desc: :updated_at)
@@ -62,6 +67,8 @@ defmodule ImportElement.ImportRequest do
     liability_count = ImportElement.AccountDetail.liability_count(import_request_id)
     payment_count = ImportElement.PaymentDetail.count(import_request_id)
     payment_total = ImportElement.PaymentDetail.total(import_request_id)
+    ready_payment_count = ImportElement.PaymentDetail.ready_count(import_request_id)
+    ready_payment_total = ImportElement.PaymentDetail.ready_total(import_request_id)
 
     %{
       corporation_count: corporation_count,
@@ -69,7 +76,9 @@ defmodule ImportElement.ImportRequest do
       ach_count: ach_count,
       liability_count: liability_count,
       payment_count: payment_count,
-      payment_total: payment_total
+      payment_total: payment_total |> Money.to_string,
+      ready_payment_count: ready_payment_count,
+      ready_payment_total: ready_payment_total |> Money.to_string
     }
   end
 end

@@ -14,6 +14,7 @@ defmodule ImportElementWeb.ImportElementLive do
      |> assign(:import_requests, ImportRequest.all())
      |> assign(:running, false)
      |> assign(:payments, [])
+     |> assign(:current_step, nil)
      |> allow_upload(:file,
        accept: ~w(.xml),
        max_file_size: 42_000_000,
@@ -60,22 +61,33 @@ defmodule ImportElementWeb.ImportElementLive do
     <section>
       <%= for import_request <- @import_requests do %>
         <article class="upload-entry">
-          <%= inspect(import_request.id) %>
+          <h3><%= import_request.id %></h3>
           <%= if import_request.data["totals"] do %>
             <% totals = import_request.data["totals"] %>
-            <h4>From XML:</h4>
+            <h4>Parsed from XML:</h4>
             <ul>
+              <li>Payments (spreadsheet rows): <%= totals["payment_count"] || 0 %></li>
+              <li>Payout total: <%= totals["payment_total"] || 0 %></li>
               <li>Corporations: <%= totals["corporation_count"] || 0 %></li>
               <li>ACH Accounts: <%= totals["ach_count"] || 0 %></li>
               <li>Individuals: <%= totals["individual_count"] || 0 %></li>
               <li>Liability Accounts: <%= totals["liability_count"] || 0 %></li>
-              <li>Payments (rows): <%= totals["payment_count"] || 0 %></li>
-              <li>Payments total: <%= totals["payment_total"] || 0 %></li>
+              <%= if import_request.status == "awaiting_approval" do %>
+                <li>Ready Payments: <%= totals["ready_payment_count"] || 0 %></li>
+                <li>Ready Payments total: <%= totals["ready_payment_total"] || 0 %></li>
+              <% end %>
             </ul>
           <% else %>
             No totals to display.
           <% end %>
-          <ul></ul>
+          <br />
+          <%= if import_request.status == "awaiting_approval" do %>
+            <% form = to_form(%{}) %>
+            <.form phx-change="validate" phx-submit="approve">
+              <.input field={form[:import_request_id]} type="hidden" value={import_request.id}></.input>
+              <.button type="submit">Approve</.button>
+            </.form>
+          <% end %>
         </article>
         <br />
       <% end %>
@@ -84,7 +96,7 @@ defmodule ImportElementWeb.ImportElementLive do
       <.spinner />
     <% else %>
       <span class="text-gray-900 font-medium">
-        <%= if @payments, do: "#{@payments} rows", else: "?" %>
+        <%= if @payments, do: "#{@payments}", else: "?" %>
       </span>
     <% end %>
     """
@@ -114,6 +126,11 @@ defmodule ImportElementWeb.ImportElementLive do
 
   def handle_event("cancel-upload", %{"ref" => ref}, socket) do
     {:noreply, cancel_upload(socket, :file, ref)}
+  end
+
+  def handle_event("approve", %{"import_request_id" => import_request_id}, socket) do
+    Task.async(fn -> create_payments(import_request_id) end)
+    {:noreply, socket}
   end
 
   defp handle_progress(:file, entry, socket) do
@@ -429,21 +446,44 @@ defmodule ImportElementWeb.ImportElementLive do
       {payment_details, data} =
         if account_detail.type == "ach" do
           outgoing_payments = Repo.preload(account_detail, [:outgoing_payments]).outgoing_payments
-          {outgoing_payments, %{"source_id" => account_detail.method_id}}
+          {outgoing_payments, %{"source" => account_detail.method_id}}
         else
           incoming_payments = Repo.preload(account_detail, [:incoming_payments]).incoming_payments
-          {incoming_payments, %{"destination_id" => account_detail.method_id}}
+          {incoming_payments, %{"destination" => account_detail.method_id}}
         end
 
       ImportElement.PaymentDetail.batch_merge_data(payment_details, data)
     end)
 
-    # now all payments should be "ready" (if ready)
+    %{
+      next_step: :awaiting_approval,
+      import_request: import_request,
+      data: %{
+        totals: ImportElement.ImportRequest.totals(import_request.id)
+      }
+    }
+  end
 
-    ready_payment_count = ImportElement.PaymentDetail.ready_count(import_request.id)
-    ready_payment_total = ImportElement.PaymentDetail.ready_total(import_request.id)
+  defp create_payments(import_request_id) do
+    payment_details = ImportElement.PaymentDetail.all_ready(import_request_id)
 
-    %{next_step: :awaiting_approval}
+    ayment_details
+    |> Task.async_stream(fn payment_detail ->
+      formatted_params = ImportElement.MethodApi.Payment.format_params(payment_detail)
+      resp = ImportElement.MethodApi.Payment.create(formatted_params)
+      ImportElement.PaymentDetail.sync_method_response(payment_detail, resp)
+    end)
+    |> Enum.to_list
+
+    import_request = ImportElement.ImportRequest.find(import_request_id)
+
+    %{
+      next_step: :finished,
+      import_request: import_request,
+      data: %{
+        totals: ImportElement.ImportRequest.totals(import_request.id)
+      }
+    }
   end
 
   ### "State machine" / import request flow management
@@ -468,6 +508,32 @@ defmodule ImportElementWeb.ImportElementLive do
 
     {:noreply,
      assign(socket, running: true, current_step: status, import_requests: ImportRequest.all())}
+  end
+
+  def handle_info(
+        {ref, %{next_step: :awaiting_approval, import_request: import_request, data: data}},
+        socket
+      ) do
+    end_task(ref)
+    status = "awaiting_approval"
+    import_request = ImportRequest.update_request(import_request, %{status: status})
+    import_request = ImportRequest.update_request_data(import_request, data)
+
+    {:noreply,
+     assign(socket, running: false, current_step: status, import_requests: ImportRequest.all())}
+  end
+
+  def handle_info(
+        {ref, %{next_step: :finished, import_request: import_request, data: data}},
+        socket
+      ) do
+    end_task(ref)
+    status = "finished"
+    import_request = ImportRequest.update_request(import_request, %{status: status, completed_at: DateTime.utc_now()})
+    import_request = ImportRequest.update_request_data(import_request, data)
+
+    {:noreply,
+     assign(socket, running: false, current_step: status, import_requests: ImportRequest.all())}
   end
 
   # catch all for unexpected messages
