@@ -37,7 +37,26 @@ Otherwise, here's where to download each:
 
 Erlang may take a while to do its thing.
 
-Once they are operational, start the Phoenix server in the repo's root directory:
+Once they are operational, you should be able to check the Elixir version via command line:
+
+```
+➜ elixir -v
+Erlang/OTP 25 [erts-13.2.2.2] [source] [64-bit] [smp:16:16] [ds:16:16:10] [async-threads:1] [jit:ns]
+
+Elixir 1.15.2 (compiled with Erlang/OTP 25)
+```
+
+Now create a file at `/config/dev.secret.exs` and add he following:
+
+```
+import Config
+
+config :import_element,
+  method_url: "https://dev.methodfi.com",
+  method_api_key: "<YOUR_API_KEY>"
+```
+
+They you should be able start the server in the repo's root directory:
 
 - Successfully run `mix setup` to install and setup the app's dependencies
 - Start the application with `mix phx.server`, or with IEx (Interactive Elixir shell) using `iex -S mix phx.server`
