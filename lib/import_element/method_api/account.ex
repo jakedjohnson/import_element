@@ -1,12 +1,18 @@
 defmodule ImportElement.MethodApi.Account do
-  def create(client.account_params) do
+  def create(account_params) do
     {:ok, response} =
-      client.post(
+      ImportElement.MethodApi.Client.post(
         "/accounts",
-        Poison.encode!(account_params),
+        account_params,
         [{"Content-Type", "application/json"}]
       )
 
     response.body[:data]
+  end
+
+  def format_params(entity, account) do
+    account.data
+    |> Map.put("holder_id", entity.method_id)
+    |> Poison.encode!()
   end
 end

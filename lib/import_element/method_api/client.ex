@@ -9,11 +9,11 @@ defmodule ImportElement.MethodApi.Client do
   )
 
   def process_request_url(url) do
-    Application.fetch_env(:import_element, :method_url) <> url
+    Application.fetch_env!(:import_element, :method_url) <> url
   end
 
   def process_request_headers(headers \\ []) do
-    {:ok, api_key} = Application.fetch_env(:import_element, :method_api_key)
+    api_key = Application.fetch_env!(:import_element, :method_api_key)
     headers ++ [Authorization: "Bearer #{api_key}"]
   end
 

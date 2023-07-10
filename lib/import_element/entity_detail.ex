@@ -10,6 +10,7 @@ defmodule ImportElement.EntityDetail do
     field :type, :string
     field :method_id, :string
     field :data, :map
+    field :capable, :boolean
 
     belongs_to :import_request, ImportElement.ImportRequest
     has_many :account_details, ImportElement.AccountDetail
@@ -21,7 +22,7 @@ defmodule ImportElement.EntityDetail do
 
   def changeset(entity_details, attrs) do
     entity_details
-    |> cast(attrs, [:type, :method_id, :uid, :import_request_id, :data])
+    |> cast(attrs, [:type, :method_id, :uid, :import_request_id, :data, :capable])
     |> validate_required([:uid, :type])
   end
 
@@ -39,5 +40,21 @@ defmodule ImportElement.EntityDetail do
   def individual_count(import_request_id) do
     query = __MODULE__ |> where(import_request_id: ^import_request_id, type: "individual")
     Repo.aggregate(query, :count, :id)
+  end
+
+  def sync_method_response(entity, data) do
+    changeset = change(entity, %{
+      method_id: data["id"],
+      capable: check_capability(data)
+    })
+    Repo.update!(changeset)
+  end
+
+  def check_capability(%{"type" => "individual", "capabilities" => capabilities}) do
+    Enum.member?(capabilities, "payments:receive")
+  end
+
+  def check_capability(%{"type" => "llc", "capabilities" => capabilities}) do
+    Enum.member?(capabilities, "payments:send")
   end
 end

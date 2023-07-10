@@ -50,7 +50,9 @@ defmodule ImportElement.MixProject do
       {:gettext, "~> 0.20"},
       {:jason, "~> 1.2"},
       {:plug_cowboy, "~> 2.5"},
-      {:sweet_xml, "~> 0.7.1"}
+      {:sweet_xml, "~> 0.7.1"},
+      {:httpoison, "~> 2.0"},
+      {:poison, "~> 5.0"}
     ]
   end
 

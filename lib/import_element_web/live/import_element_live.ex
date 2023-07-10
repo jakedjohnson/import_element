@@ -4,6 +4,9 @@ defmodule ImportElementWeb.ImportElementLive do
 
   alias ImportElement.{EntityDetail, ImportRequest, Repo}
 
+  @one_minute 60_000
+  @ten_minutes 600_000
+
   def mount(_params, _session, socket) do
     {:ok,
      socket
@@ -175,14 +178,14 @@ defmodule ImportElementWeb.ImportElementLive do
               ~x".",
               name: ~x"./Name/text()"s,
               dba: ~x"./DBA/text()"s,
-              ein: ~x"./EIN/text()"s,
-              address: [
-                ~x"./Address",
-                line_1: ~x"./Line1/text()"s,
-                city: ~x"./City/text()"s,
-                state: ~x"./State/text()"s,
-                zip: ~x"./Zip/text()"s
-              ]
+              ein: ~x"./EIN/text()"s
+            ],
+            address: [
+              ~x"./Address",
+              line1: ~x"./Line1/text()"s,
+              city: ~x"./City/text()"s,
+              state: ~x"./State/text()"s,
+              zip: ~x"./Zip/text()"s
             ]
           ],
           account: [
@@ -207,7 +210,7 @@ defmodule ImportElementWeb.ImportElementLive do
               first_name: ~x"./FirstName/text()"s,
               last_name: ~x"./LastName/text()"s,
               dob: ~x"./DOB/text()"s,
-              phone_number: ~x"./PhoneNumber/text()"s
+              phone: ~x"./PhoneNumber/text()"s
             ],
             metadata: [
               ~x"./Employee",
@@ -262,7 +265,8 @@ defmodule ImportElementWeb.ImportElementLive do
                           metadata: ach_metadata
                         },
                         entity: %{
-                          corporation: corporation
+                          corporation: corporation,
+                          address: corporate_address
                         }
                       },
                       metadata: payment_metadata
@@ -291,8 +295,9 @@ defmodule ImportElementWeb.ImportElementLive do
           type: "corporation",
           uid: corporation.ein,
           data: %{
-            type: "corporation",
-            corporation: Map.put(corporation, :owners, [])
+            type: "llc",
+            corporation: Map.put(corporation, :owners, []),
+            address: corporate_address
           }
         }),
         on_conflict: [set: [updated_at: DateTime.utc_now()]],
@@ -367,6 +372,78 @@ defmodule ImportElementWeb.ImportElementLive do
         totals: ImportElement.ImportRequest.totals(import_request.id)
       }
     }
+  end
+
+  defp sync_api(import_request) do
+    entities_needing_sync = EntityDetail.all_for_import_request(import_request.id)
+
+    capable_entities =
+      entities_needing_sync
+      |> Task.async_stream(
+        fn %{data: entity_params} = entity_detail ->
+          formatted_params = ImportElement.MethodApi.Entity.format_params(entity_params)
+          resp = ImportElement.MethodApi.Entity.create(formatted_params)
+          entity_detail = ImportElement.EntityDetail.sync_method_response(entity_detail, resp)
+          {resp, entity_detail}
+        end,
+        max_concurrency: 1,
+        timeout: @one_minute,
+        ordered: false
+      )
+      |> Enum.to_list()
+      |> Enum.reduce([], fn {_task_result, {_resp, entity}}, acc ->
+        if entity.capable do
+          entity = Repo.preload(entity, [:account_details])
+          [entity | acc]
+        end
+      end)
+      |> List.flatten()
+
+    capable_accounts =
+      capable_entities
+      |> Task.async_stream(
+        fn %{account_details: [%{data: account_params} = account_detail]} = entity ->
+          {:ok, account_detail} =
+            if account_detail.type == "liability" do
+              [merchant] = ImportElement.MethodApi.Merchant.find(account_params)
+              ImportElement.AccountDetail.sync_merchant(account_detail, merchant)
+            else
+              {:ok, account_detail}
+            end
+
+          formatted_params = ImportElement.MethodApi.Account.format_params(entity, account_detail)
+          resp = ImportElement.MethodApi.Account.create(formatted_params)
+          {:ok, account_detail} = ImportElement.AccountDetail.sync_method_response(account_detail, resp)
+
+          {resp, account_detail}
+        end,
+        max_concurrency: 1,
+        timeout: @one_minute,
+        ordered: false
+      )
+      |> Enum.to_list()
+
+
+    capable_accounts
+    |> Enum.map(fn {_task_result, {_resp, account_detail}} ->
+      {payment_details, data} =
+        if account_detail.type == "ach" do
+          outgoing_payments = Repo.preload(account_detail, [:outgoing_payments]).outgoing_payments
+          {outgoing_payments, %{"source_id" => account_detail.method_id}}
+        else
+          incoming_payments = Repo.preload(account_detail, [:incoming_payments]).incoming_payments
+          {incoming_payments, %{"destination_id" => account_detail.method_id}}
+        end
+
+      ImportElement.PaymentDetail.batch_merge_data(payment_details, data)
+    end)
+
+    # now all payments should be "ready" (if ready)
+
+    ready_payment_count = ImportElement.PaymentDetail.ready_count(import_request.id)
+    ready_payment_total = ImportElement.PaymentDetail.ready_total(import_request.id)
+
+    %{next_step: :awaiting_approval}
   end
 
   ### "State machine" / import request flow management
