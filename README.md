@@ -50,50 +50,43 @@ Below details how the ImportElement import and export logic works. The large mar
 
 ## Feature #1 - Importing Payments
 
-1. The element intializes with a file upload imput to prompt the user
-2. LiveView stores a temporary upload, which the backend then ingests
+1. The element intializes with a file upload imput to prompt the user.
+2. LiveView stores a temporary upload of the file.
 3. An `import_request` gets created. (This is the main object of the Import Element - each file uploaded equals a new `import_request` and they track the overall progress of the import.)
-5. The XML data gets parsed and each row of payment data gets persisted in Postgres.
-6. The element calls the Entities API to create the individuals and corporations
-7. Liability accounts associated to "capable" entities are then individually fed through the Merchant API to obtain the proper merchant_id (via the Plaid ID)
-8. All accounts are created via the Accounts API.
-9. Payment details for all "capable" accounts are then created (in the app, not the API yet)
-10. When the import_request is "finished" the user can see information about the file processing and is prompted to approve the total payout.
-11. If the user approves the payout, the app then submits all payment details to the Payments API
-12. When all 
-
-- separate `entity_details`, `account_details`, and `payment_details` tables and schemas that enforce the same associations as the Method API
-- these locally stored details are only lighted validated prior to upsert (raw-er data is preferred for inevitable debugging purposes)
-- once all records are successfully uploaded via the API, the `import_request.status` is "completed" and the user should see all entities, accounts, and payments on their Method dashboard.
-- all records take advantage of the `metadata` field
+5. The XML data gets parsed on the backend, and each row of payment data gets persisted into a Postgres database.
+   1. there are separate `entity_details`, `account_details`, and `payment_details` tables and schemas that enforce the same associations as the Method API
+   2. These locally stored details are only lighted validated prior to upsert (raw-er data is preferred for inevitable debugging purposes)
+   3. All records take advantage of the `metadata` field to help query with future response data
+7. The element calls the Entities API to create the individuals and corporations.
+8. Liability accounts associated to "capable" entities are then individually fed through the Merchant API to obtain the proper merchant_id (via the Plaid ID).
+9. All accounts are created via the Accounts API.
+10. Payment details for all "capable" accounts are then created (in the app, not the API yet).
+11. User is then prompted to approve the total payout.
+12. If the user approves the payout, the app then submits all payment details to the Payments API.
+13. When the import_request is "finished" the user should see information about the file processing and all entities, accounts, and payments on their Method dashboard.
 
 ## Feature #2 - Exporting Reports
 
-1. When an `import_request` is "finished", the app refetches all Payment data from the Payments API. This payment data is used to calculate totals that are then displayed to the user
-2. The payments are grouped by via a UUID for the `import_request` (stored in the Payment's `metadata` field)
+1. When an `import_request` is "finished", the app refetches all Payment data from the Payments API. This payment data is used to calculate totals that are then displayed to the user.
+2. The payments are grouped by a UUID for the `import_request` (which was stored in the Payment's `metadata` field).
 3. CSV reports are generated for the user's imports and can be downloaded.
 
 # What I didn't finish in time
 
-- Calls should be batched for reduced API traffic
-  - 10,000 unique individual entities (employees), belonging to 30 company entities (branches)
-  - sources should be 5 Dunkin owned checking accounts
-- User can discard all payment details for an `import_request`
 - 3 CSV reports
-- Better front end styling
+  - I ran out of time but would've used the UIDs I stored in the payment metadata to further group the import_request's payments
+- Calls should be batched for reduced API traffic
+  - My plan would've implemented something with Elixir's Supervisor to create a cache of the request count that resets every minute. All requests made the app could access this cache and pause for a minute if the limit is reached.
+- User can discard all payment details for an `import_request`
+  - I just plain missed this one on all my re-read of the prompt, but implementing a delete or soft delete would've been pretty straightforward.
 - Being able to close the app and still have the import process in the background
+  - Because I was re-familiarizing myself with LiveView I had to relearn ways to trigger background processing and ended up building just the synchronous/interactive happy path. I would move a lot of the `import_request` flow to a supervisor and async tasks so that processing can continue even when the user disconnects the LiveView socket.
 
 # Future Considerations
 
-- [ ] Authenticate logged in user via `api_key` or `element_token` request parameter?
 - [ ] Better error handling on XML upload (bad param value formatting, XML syntax errors, etc)
 - [ ] CSV upload ability (smaller files allow for more volume)
 - [ ] Immediately send the XML file to remote storage on the client side
-  - https://hexdocs.pm/phoenix_live_view/uploads-external.html
-  - pros:
-    - a carbon copy will help with debugging/testing in the future
-  - cons:
-    - XML is larger storage space
   - compliance considerations:
     - short and long term storage need to meet security standards
     - is there a documented data retention policy in place?
@@ -102,6 +95,7 @@ Below details how the ImportElement import and export logic works. The large mar
 - [ ] Retries for failed API calls to the Method API
 - [ ] Make the dashboard's endpoints part of Method's public API? (headless option for bulk upload)
 - [ ] `import_request.api_user_id` being the Method API user performing the spreadsheet upload (in this case, Dunkies). It should be associated to the API key used and/or `element_token` provided
-- [ ] idempotency of `import_request` flow
+- [ ] Scan for any idempotency edge cases of `import_request` flow
 - [ ] db cleanup when import_requests are not actively working (all uploads complete == empty database)
 - [ ] `mix release` to avoid local dev setup headaches
+- [ ] Authenticate logged in user via `api_key` or `element_token` request parameter?
