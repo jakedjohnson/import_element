@@ -1,12 +1,12 @@
 # ImportElement
 
-A service for bulk uploading payment data to the Method API.
+> A service for bulk uploading payment data to the Method API.
 
 The ImportElement is intended for authenticated users to bulk upload spreadsheets (XML) containing payment information between source (ACH) accounts and destination (liability) accounts. Once the XML file is imported, the user should be able to download a CSV report of the associated payments created and fetched via the Method API.
 
 # Technical Details
 
-ImportElement is powered by Phoenix and LiveView. First and foremost, I wanted to work in the language I am most comfortable in. I also wanted to see if I could use LiveView to create a sort of single page, standalone application that could be deployed similar to current Method elements.
+ImportElement is powered by Phoenix and LiveView. First and foremost, I wanted to work in the language I am most comfortable in. I also wanted to see if I could use LiveView to create a sort of single page, standalone application that could be deployed and used in a manner similar to current Method elements.
 
 When TaxJar needed to scale their spreadsheet importer, they chose Elixir. A service built with Elixir gaurantees solid performance and painless scaling as import volume grows; it's a great choice whenever a feature (such as parsing and processing large sets of XML data) requires speedy and reliable concurrency.
 
@@ -35,7 +35,7 @@ Otherwise, here's where to download each:
 - [Erlang](https://www.erlang.org/patches/otp-25.3.2.3)
 - [Elixir](https://elixir-lang.org/install.html)
 
-Erlang may take a while to do its thing.
+> Note: Erlang may take a while to do its thing.
 
 Once they are operational, you should be able to check the Elixir version via command line:
 
@@ -46,7 +46,7 @@ Erlang/OTP 25 [erts-13.2.2.2] [source] [64-bit] [smp:16:16] [ds:16:16:10] [async
 Elixir 1.15.2 (compiled with Erlang/OTP 25)
 ```
 
-Now create a file at `/config/dev.secret.exs` and add he following:
+Now create a file at `/config/dev.secret.exs` and add the following:
 
 ```
 import Config
@@ -72,15 +72,15 @@ Below details how the ImportElement import and export logic works. The large maj
 1. The element intializes with a file upload imput to prompt the user.
 2. LiveView stores a temporary upload of the file.
 3. An `import_request` gets created. (This is the main object of the Import Element - each file uploaded equals a new `import_request` and they track the overall progress of the import.)
-5. The XML data gets parsed on the backend, and each row of payment data gets persisted into a Postgres database.
-   1. there are separate `entity_details`, `account_details`, and `payment_details` tables and schemas that enforce the same associations as the Method API
-   2. These locally stored details are only lighted validated prior to upsert (raw-er data is preferred for inevitable debugging purposes)
-   3. All records take advantage of the `metadata` field to help query with future response data
+5. The XML data gets parsed on the backend, and each row of payment data gets persisted into the Postgres database.
+   1. there are separate `entity_details`, `account_details`, and `payment_details` tables and schemas that enforce the same associations as the Method API (leveraging Ecto makes future error messaging a breeze).
+   2. These locally stored details are only lighted validated prior to upsert (raw-er data is preferred for inevitable debugging purposes later on).
+   3. All records take advantage of the `metadata` field to help query with future response data.
 7. The element calls the Entities API to create the individuals and corporations.
 8. Liability accounts associated to "capable" entities are then individually fed through the Merchant API to obtain the proper merchant_id (via the Plaid ID).
-9. All accounts are created via the Accounts API.
-10. Payment details for all "capable" accounts are then created (in the app, not the API yet).
-11. User is then prompted to approve the total payout.
+9. All liability and ACH accounts are created via the Accounts API.
+10. Payment details for all "capable" accounts are then created (in the app, not via the API yet).
+11. The user is then prompted to approve the total payout.
 12. If the user approves the payout, the app then submits all payment details to the Payments API.
 13. When the import_request is "finished" the user should see information about the file processing and all entities, accounts, and payments on their Method dashboard.
 
