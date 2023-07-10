@@ -65,7 +65,7 @@ Now you can visit [`localhost:4000`](http://localhost:4000) from your browser to
 
 # Implementation Details
 
-Below details how the ImportElement import and export logic works. The large marjority of this logic lives in the `lib/import_element_web/live/import_element_live.ex` LiveView component.
+Below details how the ImportElement import and export logic works. The large majority of this logic lives in the `lib/import_element_web/live/import_element_live.ex` LiveView component.
 
 ## Feature #1 - Importing Payments
 
