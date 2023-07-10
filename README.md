@@ -12,7 +12,7 @@ When TaxJar needed to scale their spreadsheet importer, they chose Elixir. A ser
 
 ## Getting ImportElement running on MacOS
 
-Note: I'm happy to jump on a pairing session if you have any issues with setup!
+> Note: I'm happy to jump on a pairing session if you have any issues with setup!
 
 First install Erlang and Elixir.
 
