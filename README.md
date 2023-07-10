@@ -1,12 +1,18 @@
 # ImportElement
 
-A service for bulk uploading spreadsheet data to the Method API. The frontend dashboard can be used in used in an `iframe`, offering the seamless element experience Method users are accustomed to.
+A service for bulk uploading payment data to the Method API.
+
+The ImportElement is intended for authenticated users to bulk upload spreadsheets (XML) containing payment information between source (ACH) accounts and destination (liability) accounts. Once the XML file is imported, the user should be able to download a CSV report of the associated payments created and fetched via the Method API.
 
 # Technical Details
 
-ImportElement is a web application powered by Phoenix. When TaxJar needed to scale their spreadsheet importer, they chose Elixir. A service built with Elixir gaurantees solid performance and painless scaling as import volume grows; it's a great choice whenever a feature (such as parsing and processing large sets of XML data in memory) requires speedy and reliable concurrency.
+ImportElement is powered by Phoenix and LiveView. First and foremost, I wanted to work in the language I am most comfortable in. I also wanted to see if I could use LiveView to create a sort of single page, standalone application that could be deployed similar to current Method elements.
+
+When TaxJar needed to scale their spreadsheet importer, they chose Elixir. A service built with Elixir gaurantees solid performance and painless scaling as import volume grows; it's a great choice whenever a feature (such as parsing and processing large sets of XML data) requires speedy and reliable concurrency.
 
 ## Getting ImportElement running on MacOS
+
+Note: I'm happy to jump on a pairing session if you have any issues with setup!
 
 First install Erlang and Elixir.
 
@@ -40,62 +46,42 @@ Now you can visit [`localhost:4000`](http://localhost:4000) from your browser to
 
 # Implementation Details
 
-The ImportElement is intended for authenticated users to bulk upload spreadsheets (XML) containing payment information between source (ACH) accounts and destination (liability) accounts.
-
-There are two distinct layers to the backend logic:
-
-- The core ImportElement application handles any processes pertaining to importing and exporting spreadsheet data. The `import_request` table stores and tracks everything related to the user's experience while using the element.
-- The MethodEx dependency contains all knowledge of the Method API. It can validate a user's submitted data for API ingestible parameters, gives Elixir some structure for API-related objects, and handles all request and response logic.
+Below details how the ImportElement import and export logic works. The large marjority of this logic lives in the `import_element_live.ex` LiveView component.
 
 ## Feature #1 - Importing Payments
 
-When a user uploads an XML of unique payments, ImportElement performs the following procedure:
+1. The element intializes with a file upload imput to prompt the user
+2. LiveView stores a temporary upload, which the backend then ingests
+3. An `import_request` gets created. (This is the main object of the Import Element - each file uploaded equals a new `import_request` and they track the overall progress of the import.)
+5. The XML data gets parsed and each row of payment data gets persisted in Postgres.
+6. The element calls the Entities API to create the individuals and corporations
+7. Liability accounts associated to "capable" entities are then individually fed through the Merchant API to obtain the proper merchant_id (via the Plaid ID)
+8. All accounts are created via the Accounts API.
+9. Payment details for all "capable" accounts are then created (in the app, not the API yet)
+10. When the import_request is "finished" the user can see information about the file processing and is prompted to approve the total payout.
+11. If the user approves the payout, the app then submits all payment details to the Payments API
+12. When all 
 
-1. A remote and local copy of the file are stored
-2. An `import_request` gets created. This is the main object of the Import Element - each file uploaded equals a new `import_request`.
-
-
-- `import_request.status` - progress tracking
-- `import_request.filepath` - the storage location of the spreadsheet
-
-3. parses the XML data using the SweetXML Elixir Dependency
-4. temporarily persists all entities, accounts, and payments in local application database
-
-- separate `entity_details`, `account_details`, and `payment_details` tables
-- all individual records must contain the `import_request_id`
-- ? these locally stored details are only lighted validated prior to upsert (raw-er data is preferred for inevitable debugging purposes)
-- the idea is to only query these temporary records for reasons pertaining to idempotency of API calls, so giving them all a `api_object_uuid` or `api_call_uuid`
-
-5. validates the spreadsheet data contains acceptable API parameters
-
-- Any invalid entities are omitted
-
-6. upserts all records via the Method API
-
-- `entity_details`, `account_details`, and `payment_details` are all structs mirroring the Method API
-- `payment_details` are created/initialized for review, but not yet finalized
-- ideally records persisted on Method's end would be given some `import_request_id` metadata/reference for easier querying from the element
-
-7. the user confirms the payments displayed are accurate, or rejects the bunch
-
-- if accepted, all payments are finalized
-
-8. once all records are successfully uploaded via the API, the `import_request.status` is "completed" and the user should see all entities, accounts, and payments on their Method dashboard.
+- separate `entity_details`, `account_details`, and `payment_details` tables and schemas that enforce the same associations as the Method API
+- these locally stored details are only lighted validated prior to upsert (raw-er data is preferred for inevitable debugging purposes)
+- once all records are successfully uploaded via the API, the `import_request.status` is "completed" and the user should see all entities, accounts, and payments on their Method dashboard.
+- all records take advantage of the `metadata` field
 
 ## Feature #2 - Exporting Reports
 
-- 1. when an `import_request` is "completed", the user can access the payment reports
-- 2. the payment reports page allows for downloading 3 different report CSVs generated from the original XML data provided.
-  - i) outgoing payment totals for each unique 5 different corporate checking source accounts owned by Dunkin
-  - ii) outgoing payment totals per 30 unique dunkin branches (a branch isn't an entity we care about for account ownership, we just need it to be present for aggregation during payment reports)
-  - iii) the status of every payment and its relevant metadata
-- 3. reports can be downloaded
+1. When an `import_request` is "finished", the app refetches all Payment data from the Payments API. This payment data is used to calculate totals that are then displayed to the user
+2. The payments are grouped by via a UUID for the `import_request` (stored in the Payment's `metadata` field)
+3. CSV reports are generated for the user's imports and can be downloaded.
 
-# Some Reminders
+# What I didn't finish in time
 
-- calls should be batched for reduced API traffic
-- 10,000 unique individual entities (employees), belonging to 30 company entities (branches)
-- sources should be 5 Dunkin owned checking accounts
+- Calls should be batched for reduced API traffic
+  - 10,000 unique individual entities (employees), belonging to 30 company entities (branches)
+  - sources should be 5 Dunkin owned checking accounts
+- User can discard all payment details for an `import_request`
+- 3 CSV reports
+- Better front end styling
+- Being able to close the app and still have the import process in the background
 
 # Future Considerations
 
@@ -118,3 +104,4 @@ When a user uploads an XML of unique payments, ImportElement performs the follow
 - [ ] `import_request.api_user_id` being the Method API user performing the spreadsheet upload (in this case, Dunkies). It should be associated to the API key used and/or `element_token` provided
 - [ ] idempotency of `import_request` flow
 - [ ] db cleanup when import_requests are not actively working (all uploads complete == empty database)
+- [ ] `mix release` to avoid local dev setup headaches
