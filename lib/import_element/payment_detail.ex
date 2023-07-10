@@ -6,6 +6,7 @@ defmodule ImportElement.PaymentDetail do
   alias ImportElement.Repo
 
   schema "payment_details" do
+    field :amount, Money.Ecto.Amount.Type
     field :method_id, :string
     field :data, :map
     field :ready, :boolean
@@ -27,9 +28,11 @@ defmodule ImportElement.PaymentDetail do
       :import_request_id,
       :source_id,
       :destination_id,
-      :ready
+      :ready,
+      :amount
     ])
     |> check_ready()
+    |> convert_amount()
   end
 
   defp check_ready(changeset) do
@@ -40,6 +43,16 @@ defmodule ImportElement.PaymentDetail do
 
   defp params_ready(%{"source_id" => _, "destination_id" => _}), do: true
   defp params_ready(_), do: false
+
+  defp convert_amount(changeset) do
+    amount = get_change(changeset, :data, %{})["amount"]
+    if amount do
+      pennies = Money.parse!(amount).amount
+      put_change(changeset, :amount, pennies)
+    else
+      changeset
+    end
+  end
 
   def count(import_request_id) do
     query = __MODULE__ |> where(import_request_id: ^import_request_id)

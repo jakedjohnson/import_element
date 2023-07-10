@@ -52,7 +52,8 @@ defmodule ImportElement.MixProject do
       {:plug_cowboy, "~> 2.5"},
       {:sweet_xml, "~> 0.7.1"},
       {:httpoison, "~> 2.0"},
-      {:poison, "~> 5.0"}
+      {:poison, "~> 5.0"},
+      {:money, "~> 1.12"}
     ]
   end
 
