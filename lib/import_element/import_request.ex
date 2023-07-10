@@ -10,6 +10,8 @@ defmodule ImportElement.ImportRequest do
     field :file, :string
     field :data, :map
     field :completed_at, :utc_datetime
+    field :report_path, :string
+    field :uuid, Ecto.UUID, autogenerate: true
 
     has_many :entity_details, ImportElement.EntityDetail
     has_many :account_details, ImportElement.AccountDetail
@@ -22,7 +24,7 @@ defmodule ImportElement.ImportRequest do
 
   def changeset(import_request, attrs) do
     import_request
-    |> cast(attrs, [:status, :file, :data, :completed_at])
+    |> cast(attrs, [:status, :file, :data, :completed_at, :report_path, :uuid])
     |> validate_required([:file])
   end
 
@@ -52,6 +54,11 @@ defmodule ImportElement.ImportRequest do
 
   def find(id) do
     Repo.get!(__MODULE__, id)
+  end
+
+  def find_by_uuid(uuid) do
+    query = __MODULE__ |> where(uuid: ^uuid)
+    Repo.one(query)
   end
 
   def all() do

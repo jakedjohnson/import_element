@@ -53,7 +53,8 @@ defmodule ImportElement.MixProject do
       {:sweet_xml, "~> 0.7.1"},
       {:httpoison, "~> 2.0"},
       {:poison, "~> 5.0"},
-      {:money, "~> 1.12"}
+      {:money, "~> 1.12"},
+      {:csv, "~> 3.0"}
     ]
   end
 

@@ -13,7 +13,7 @@ defmodule ImportElementWeb.ImportElementLive do
      |> assign(:uploaded_files, [])
      |> assign(:import_requests, ImportRequest.all())
      |> assign(:running, false)
-     |> assign(:payments, [])
+     |> assign(:payments, Task.async(fn -> reload_payments() end))
      |> assign(:current_step, nil)
      |> allow_upload(:file,
        accept: ~w(.xml),
@@ -60,10 +60,12 @@ defmodule ImportElementWeb.ImportElementLive do
     </section>
     <section>
       <%= for import_request <- @import_requests do %>
+        <% status = import_request.status %>
+        <% totals = import_request.data["totals"] %>
+        <% has_imported_payments = @payments |> Map.get(import_request.uuid, []) |> Enum.any?() %>
         <article class="upload-entry">
           <h3><%= import_request.id %></h3>
           <%= if import_request.data["totals"] do %>
-            <% totals = import_request.data["totals"] %>
             <h4>Parsed from XML:</h4>
             <ul>
               <li>Payments (spreadsheet rows): <%= totals["payment_count"] || 0 %></li>
@@ -72,33 +74,36 @@ defmodule ImportElementWeb.ImportElementLive do
               <li>ACH Accounts: <%= totals["ach_count"] || 0 %></li>
               <li>Individuals: <%= totals["individual_count"] || 0 %></li>
               <li>Liability Accounts: <%= totals["liability_count"] || 0 %></li>
-              <%= if import_request.status == "awaiting_approval" do %>
+              <%= if status == "awaiting_approval" do %>
                 <li>Ready Payments: <%= totals["ready_payment_count"] || 0 %></li>
                 <li>Ready Payments total: <%= totals["ready_payment_total"] || 0 %></li>
+              <% end %>
+              <%= if status == "finished" && has_imported_payments do %>
+                <li>Submitted Payments: <%= @payments |> Map.get(import_request.uuid) |> Enum.count() %></li>
+                <li>Submitted Payments total: <%= @payments |> Map.get(import_request.uuid) |> Enum.map(&(&1["amount"])) |> Enum.sum() |> Money.new() |> Money.to_string() %></li>
+              <% end %>
+              <%= if @running && Enum.member?(["api_sync", "processing_file"], status) do %>
+                <.spinner />
               <% end %>
             </ul>
           <% else %>
             No totals to display.
           <% end %>
           <br />
-          <%= if import_request.status == "awaiting_approval" do %>
+          <%= if status == "awaiting_approval" do %>
             <% form = to_form(%{}) %>
             <.form phx-change="validate" phx-submit="approve">
               <.input field={form[:import_request_id]} type="hidden" value={import_request.id}></.input>
               <.button type="submit">Approve</.button>
             </.form>
           <% end %>
+          <%= if status == "finished" && has_imported_payments && import_request.report_path do %>
+            <.link href={import_request.report_path}></.link>
+          <% end %>
         </article>
         <br />
       <% end %>
     </section>
-    <%= if @running do %>
-      <.spinner />
-    <% else %>
-      <span class="text-gray-900 font-medium">
-        <%= if @payments, do: "#{@payments}", else: "?" %>
-      </span>
-    <% end %>
     """
   end
 
@@ -465,24 +470,52 @@ defmodule ImportElementWeb.ImportElementLive do
   end
 
   defp create_payments(import_request_id) do
+    import_request = ImportElement.ImportRequest.find(import_request_id)
     payment_details = ImportElement.PaymentDetail.all_ready(import_request_id)
 
-    ayment_details
+    payment_details
     |> Task.async_stream(fn payment_detail ->
-      formatted_params = ImportElement.MethodApi.Payment.format_params(payment_detail)
+      formatted_params = ImportElement.MethodApi.Payment.format_params(import_request, payment_detail)
       resp = ImportElement.MethodApi.Payment.create(formatted_params)
       ImportElement.PaymentDetail.sync_method_response(payment_detail, resp)
     end)
-    |> Enum.to_list
-
-    import_request = ImportElement.ImportRequest.find(import_request_id)
+    |> Enum.to_list()
 
     %{
       next_step: :finished,
-      import_request: import_request,
+      import_request: ImportElement.ImportRequest.find(import_request_id),
       data: %{
-        totals: ImportElement.ImportRequest.totals(import_request.id)
+        totals: ImportElement.ImportRequest.totals(import_request_id)
       }
+    }
+  end
+
+  def reload_payments() do
+    grouped_payments =
+      ImportElement.MethodApi.Payment.list()
+      |> Enum.filter(fn payment -> payment["metadata"]["import_request_uuid"] end)
+      |> Enum.group_by(fn payment -> payment["metadata"]["import_request_uuid"] end)
+
+    Enum.each(grouped_payments, fn {uuid, payments} ->
+      if import_request = ImportElement.ImportRequest.find_by_uuid(uuid) do
+        csv_file = Path.rootname(import_request.file) <> ".csv"
+        destination = Path.join([:code.priv_dir(:import_element), "static", csv_file])
+        file = File.open!(destination, [:write, :utf8])
+
+        payments
+        |> Enum.map(fn payment ->
+          Map.put(payment, "metadata", Poison.encode!(payment["metadata"]))
+        end)
+        |> CSV.encode(headers: true)
+        |> Enum.each(&IO.write(file, &1))
+
+        ImportElement.ImportRequest.update_request(import_request, %{report_path: csv_file})
+      end
+    end)
+
+    %{
+      trigger: :payments_loaded,
+      payments: grouped_payments
     }
   end
 
@@ -531,9 +564,18 @@ defmodule ImportElementWeb.ImportElementLive do
     status = "finished"
     import_request = ImportRequest.update_request(import_request, %{status: status, completed_at: DateTime.utc_now()})
     import_request = ImportRequest.update_request_data(import_request, data)
+    Task.async(fn -> reload_payments() end)
 
     {:noreply,
      assign(socket, running: false, current_step: status, import_requests: ImportRequest.all())}
+  end
+
+  def handle_info(
+    {ref, %{trigger: :payments_loaded, payments: payments}},
+    socket
+  ) do
+    end_task(ref)
+    {:noreply, assign(socket, payments: payments)}
   end
 
   # catch all for unexpected messages
